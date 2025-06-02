@@ -1,0 +1,4 @@
+student_id,problem_id,skill_id,correct
+1,101,1,1
+1,102,1,0
+2,101,1,1
