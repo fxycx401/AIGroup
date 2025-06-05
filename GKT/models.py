@@ -1,4 +1,4 @@
-# coding: utf-8
+
 import numpy as np
 import scipy.sparse as sp
 import torch
@@ -8,11 +8,6 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.autograd import Variable
 from layers import MLP, EraseAddGate, MLPEncoder, MLPDecoder, ScaledDotProductAttention
 from utils import gumbel_softmax
-
-# Graph-based Knowledge Tracing: Modeling Student Proficiency Using Graph Neural Network.
-# For more information, please refer to https://dl.acm.org/doi/10.1145/3350546.3352513
-# Author: jhljx
-# Email: jhljx8918@gmail.com
 
 
 class GKT(nn.Module):
@@ -77,20 +72,6 @@ class GKT(nn.Module):
 
     # Aggregate step, as shown in Section 3.2.1 of the paper
     def _aggregate(self, xt, qt, ht, batch_size):
-        r"""
-        Parameters:
-            xt: input one-hot question answering features at the current timestamp
-            qt: question indices for all students in a batch at the current timestamp
-            ht: hidden representations of all concepts at the current timestamp
-            batch_size: the size of a student batch
-        Shape:
-            xt: [batch_size]
-            qt: [batch_size]
-            ht: [batch_size, concept_num, hidden_dim]
-            tmp_ht: [batch_size, concept_num, hidden_dim + embedding_dim]
-        Return:
-            tmp_ht: aggregation results of concept hidden knowledge state and concept(& response) embedding
-        """
         qt_mask = torch.ne(qt, -1)  # [batch_size], qt != -1
         x_idx_mat = torch.arange(self.res_len * self.concept_num, device=xt.device)
         x_embedding = self.emb_x(x_idx_mat)  # [res_len * concept_num, embedding_dim]
@@ -109,20 +90,7 @@ class GKT(nn.Module):
 
     # GNN aggregation step, as shown in 3.3.2 Equation 1 of the paper
     def _agg_neighbors(self, tmp_ht, qt):
-        r"""
-        Parameters:
-            tmp_ht: temporal hidden representations of all concepts after the aggregate step
-            qt: question indices for all students in a batch at the current timestamp
-        Shape:
-            tmp_ht: [batch_size, concept_num, hidden_dim + embedding_dim]
-            qt: [batch_size]
-            m_next: [batch_size, concept_num, hidden_dim]
-        Return:
-            m_next: hidden representations of all concepts aggregating neighboring representations at the next timestamp
-            concept_embedding: input of VAE (optional)
-            rec_embedding: reconstructed input of VAE (optional)
-            z_prob: probability distribution of latent variable z in VAE (optional)
-        """
+
         qt_mask = torch.ne(qt, -1)  # [batch_size], qt != -1
         masked_qt = qt[qt_mask]  # [mask_num, ]
         masked_tmp_ht = tmp_ht[qt_mask]  # [mask_num, concept_num, hidden_dim + embedding_dim]
@@ -336,16 +304,7 @@ class MultiHeadAttention(nn.Module):
         self.graphs.requires_grad = False
 
     def _get_graph(self, attn_score, qt):
-        r"""
-        Parameters:
-            attn_score: attention score of all queries
-            qt: masked question index
-        Shape:
-            attn_score: [n_head, mask_num, concept_num]
-            qt: [mask_num]
-        Return:
-            graphs: n_head types of inferred graphs
-        """
+
         graphs = Variable(torch.zeros(self.n_head, self.concept_num, self.concept_num, device=qt.device))
         for k in range(self.n_head):
             index_tuple = (qt.long(), )
@@ -357,19 +316,7 @@ class MultiHeadAttention(nn.Module):
         return graphs
 
     def forward(self, qt, query, key, mask=None):
-        r"""
-        Parameters:
-            qt: masked question index
-            query: answered concept embedding for a student batch
-            key: concept embedding matrix
-            mask: mask matrix
-        Shape:
-            qt: [mask_num]
-            query: [mask_num, embedding_dim]
-            key: [concept_num, embedding_dim]
-        Return:
-            graphs: n_head types of inferred graphs
-        """
+
         d_k, n_head = self.d_k, self.n_head
         len_q, len_k = query.size(0), key.size(0)
 
@@ -400,18 +347,7 @@ class VAE(nn.Module):
         self.graphs.requires_grad = False
 
     def _get_graph(self, edges, sp_rec, sp_send):
-        r"""
-        Parameters:
-            edges: sampled latent graph edge weights from the probability distribution of the latent variable z
-            sp_rec: one-hot encoded receive-node index(sparse tensor)
-            sp_send: one-hot encoded send-node index(sparse tensor)
-        Shape:
-            edges: [edge_num, edge_type_num]
-            sp_rec: [edge_num, concept_num]
-            sp_send: [edge_num, concept_num]
-        Return:
-            graphs: latent graph list modeled by z which has different edge types
-        """
+
         x_index = sp_send._indices()[1].long()  # send node index: [edge_num, ]
         y_index = sp_rec._indices()[1].long()   # receive node index [edge_num, ]
         graphs = Variable(torch.zeros(self.edge_type_num, self.concept_num, self.concept_num, device=edges.device))
@@ -425,24 +361,7 @@ class VAE(nn.Module):
         return graphs
 
     def forward(self, data, sp_send, sp_rec, sp_send_t, sp_rec_t):
-        r"""
-        Parameters:
-            data: input concept embedding matrix
-            sp_send: one-hot encoded send-node index(sparse tensor)
-            sp_rec: one-hot encoded receive-node index(sparse tensor)
-            sp_send_t: one-hot encoded send-node index(sparse tensor, transpose)
-            sp_rec_t: one-hot encoded receive-node index(sparse tensor, transpose)
-        Shape:
-            data: [concept_num, embedding_dim]
-            sp_send: [edge_num, concept_num]
-            sp_rec: [edge_num, concept_num]
-            sp_send_t: [concept_num, edge_num]
-            sp_rec_t: [concept_num, edge_num]
-        Return:
-            graphs: latent graph list modeled by z which has different edge types
-            output: the reconstructed data
-            prob: q(z|x) distribution
-        """
+
         logits = self.encoder(data, sp_send, sp_rec, sp_send_t, sp_rec_t)  # [edge_num, output_dim(edge_type_num)]
         edges = gumbel_softmax(logits, tau=self.tau, dim=-1)  # [edge_num, edge_type_num]
         prob = F.softmax(logits, dim=-1)
@@ -473,17 +392,7 @@ class DKT(nn.Module):
                         nn.init.orthogonal_(weight)
 
     def _get_next_pred(self, yt, questions):
-        r"""
-        Parameters:
-            y: predicted correct probability of all concepts at the next timestamp
-            questions: question index matrix
-        Shape:
-            y: [batch_size, seq_len - 1, output_dim]
-            questions: [batch_size, seq_len]
-            pred: [batch_size, ]
-        Return:
-            pred: predicted correct probability of the question answered at the next timestamp
-        """
+
         one_hot = torch.eye(self.output_dim, device=yt.device)
         one_hot = torch.cat((one_hot, torch.zeros(1, self.output_dim, device=yt.device)), dim=0)
         next_qt = questions[:, 1:]
@@ -494,27 +403,13 @@ class DKT(nn.Module):
         return pred
 
     def forward(self, features, questions):
-        r"""
-        Parameters:
-            features: input one-hot matrix
-            questions: question index matrix
-        seq_len dimension needs padding, because different students may have learning sequences with different lengths.
-        Shape:
-            features: [batch_size, seq_len]
-            questions: [batch_size, seq_len]
-            pred_res: [batch_size, seq_len - 1]
-        Return:
-            pred_res: the correct probability of questions answered at the next timestamp
-            concept_embedding: input of VAE (optional)
-            rec_embedding: reconstructed input of VAE (optional)
-            z_prob: probability distribution of latent variable z in VAE (optional)
-        """
+
         feat_one_hot = torch.eye(self.feature_dim, device=features.device)
         feat_one_hot = torch.cat((feat_one_hot, torch.zeros(1, self.feature_dim, device=features.device)), dim=0)
         feat = torch.where(features != -1, features, self.feature_dim * torch.ones_like(features, device=features.device))
         features = F.embedding(feat, feat_one_hot)
 
-        feature_lens = torch.ne(questions, -1).sum(dim=1)  # padding value = -1
+        feature_lens = torch.ne(questions, -1).sum(dim=1).cpu()  # 保证在CPU上
         x_packed = pack_padded_sequence(features, feature_lens, batch_first=True, enforce_sorted=False)
         output_packed, _ = self.rnn(x_packed)  # [batch, seq_len, hidden_dim]
         output_padded, output_lengths = pad_packed_sequence(output_packed, batch_first=True)  # [batch, seq_len, hidden_dim]
